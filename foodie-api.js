@@ -20,13 +20,32 @@
     return token;
   }
 
+  async function functionErrorMessage(error, fallback) {
+    const response = error?.context;
+    if (response && typeof response.clone === "function") {
+      const status = response.status ? ` (HTTP ${response.status})` : "";
+      try {
+        const body = await response.clone().json();
+        if (typeof body?.error === "string") return `${body.error}${status}`;
+        if (typeof body?.message === "string") return `${body.message}${status}`;
+      } catch {
+        try {
+          const text = (await response.clone().text()).trim();
+          if (text) return `${text.slice(0, 240)}${status}`;
+        } catch {}
+      }
+      if (status) return `The nearby-food function returned an error${status}. Check its Supabase logs.`;
+    }
+    return error?.message || fallback;
+  }
+
   async function searchNearby({ latitude, longitude, area = "", searchTerm = "", cuisine = "all", radiusMeters = 5000, maxPriceTier = null }) {
     const token = await getAccessToken();
     const { data, error } = await client.functions.invoke("nearby-food", {
       body: { latitude, longitude, area, searchTerm, cuisine, radiusMeters: Math.min(radiusMeters, 10000), maxPriceTier },
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (error) throw new Error(error.message || "Live food search is unavailable. Check the Edge Function setup.");
+    if (error) throw new Error(await functionErrorMessage(error, "Live food search is unavailable. Check the Edge Function setup."));
     if (data?.error) throw new Error(data.error);
     return data;
   }
@@ -128,7 +147,7 @@
       body: { area, geocodeOnly: true },
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (error) throw new Error(error.message || "Could not look up that location.");
+    if (error) throw new Error(await functionErrorMessage(error, "Could not look up that location."));
     const result = data;
     if (result?.error) throw new Error(result.error);
     if (!result.location) throw new Error("We couldn't find that area. Try a town or neighbourhood in Malaysia.");
